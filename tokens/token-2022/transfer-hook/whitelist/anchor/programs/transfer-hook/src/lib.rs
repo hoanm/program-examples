@@ -14,9 +14,9 @@ use anchor_spl::{
 use spl_tlv_account_resolution::{
     account::ExtraAccountMeta, seeds::Seed, state::ExtraAccountMetaList,
 };
-use spl_transfer_hook_interface::instruction::ExecuteInstruction;
+use spl_transfer_hook_interface::instruction::{ExecuteInstruction, TransferHookInstruction};
 
-declare_id!("GBCFPjb4wakaXSKvVU2jcXsTzG1nPra1J6ADXyVo4YmG");
+declare_id!("AUubRa8gyR4kd6P4Nnss9a5HdDbSQdjNh8JGCFG3Y638");
 
 #[error_code]
 pub enum TransferError {
@@ -83,6 +83,27 @@ pub mod transfer_hook {
         );
 
         Ok(())
+    }
+
+    // fallback instruction handler as workaround to anchor instruction discriminator check
+    pub fn fallback<'info>(
+        program_id: &Pubkey,
+        accounts: &'info [AccountInfo<'info>],
+        data: &[u8],
+    ) -> Result<()> {
+        let instruction = TransferHookInstruction::unpack(data)?;
+
+        // match instruction discriminator to transfer hook interface execute instruction
+        // token2022 program CPIs this instruction on token transfer
+        match instruction {
+            TransferHookInstruction::Execute { amount } => {
+                let amount_bytes = amount.to_le_bytes();
+
+                // invoke custom transfer hook instruction on our program
+                __private::__global::transfer_hook(program_id, accounts, &amount_bytes)
+            }
+            _ => return Err(ProgramError::InvalidInstructionData.into()),
+        }
     }
 }
 

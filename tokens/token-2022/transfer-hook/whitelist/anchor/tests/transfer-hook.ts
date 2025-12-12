@@ -1,5 +1,6 @@
-import * as anchor from '@coral-xyz/anchor';
+import * as anchor from "@coral-xyz/anchor";
 import {
+  NATIVE_MINT,
   ASSOCIATED_TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountInstruction,
   createInitializeMintInstruction,
@@ -10,51 +11,67 @@ import {
   getAssociatedTokenAddressSync,
   getMintLen,
   TOKEN_2022_PROGRAM_ID,
-} from '@solana/spl-token';
-import { Keypair, PublicKey, SystemProgram, sendAndConfirmTransaction, Transaction } from '@solana/web3.js';
+} from "@solana/spl-token";
+import {
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  sendAndConfirmTransaction,
+  Transaction,
+} from "@solana/web3.js";
+import * as fs from "fs";
 
-describe('transfer-hook', () => {
-  const PROGRAM_ID = 'GBCFPjb4wakaXSKvVU2jcXsTzG1nPra1J6ADXyVo4YmG';
+describe("transfer-hook", () => {
+  const PROGRAM_ID = "AUubRa8gyR4kd6P4Nnss9a5HdDbSQdjNh8JGCFG3Y638";
   const PROGRAM_PUBKEY = new PublicKey(PROGRAM_ID);
+
+  //load key pairs of the pool from file pool-key.json
+  const poolKeyString = fs
+    .readFileSync("target/deploy/pool-key.json", "utf8")
+    .toString();
+  const poolKey = Keypair.fromSecretKey(
+    Uint8Array.from(JSON.parse(poolKeyString))
+  );
+  const POOL_PUBKEY = new PublicKey(poolKey.publicKey);
 
   // Inline IDL to avoid relying on on-chain or generated artifacts
   const IDL: anchor.Idl = {
     address: PROGRAM_ID,
-    version: '0.1.0',
-    name: 'transfer_hook',
+    version: "0.1.0",
+    name: "transfer_hook",
     instructions: [
       {
-        name: 'initialize_extra_account_meta_list',
+        name: "initialize_extra_account_meta_list",
         discriminator: [92, 197, 174, 197, 41, 124, 19, 3],
         accounts: [
-          { name: 'payer', isMut: true, isSigner: true },
-          { name: 'extra_account_meta_list', isMut: true, isSigner: false },
-          { name: 'mint', isMut: false, isSigner: false },
-          { name: 'system_program', isMut: false, isSigner: false },
-          { name: 'white_list', isMut: true, isSigner: false },
+          { name: "payer", isMut: true, isSigner: true },
+          { name: "extra_account_meta_list", isMut: true, isSigner: false },
+          { name: "mint", isMut: false, isSigner: false },
+          { name: "system_program", isMut: false, isSigner: false },
+          { name: "white_list", isMut: true, isSigner: false },
         ],
         args: [],
       },
       {
-        name: 'transfer_hook',
+        name: "transfer_hook",
         discriminator: [220, 57, 220, 152, 126, 125, 97, 168],
         accounts: [
-          { name: 'source_token', isMut: true, isSigner: false },
-          { name: 'mint', isMut: false, isSigner: false },
-          { name: 'destination_token', isMut: true, isSigner: false },
-          { name: 'owner', isMut: false, isSigner: false },
-          { name: 'extra_account_meta_list', isMut: false, isSigner: false },
-          { name: 'white_list', isMut: false, isSigner: false },
+          { name: "source_token", isMut: true, isSigner: false },
+          { name: "mint", isMut: false, isSigner: false },
+          { name: "destination_token", isMut: true, isSigner: false },
+          { name: "owner", isMut: false, isSigner: false },
+          { name: "extra_account_meta_list", isMut: false, isSigner: false },
+          { name: "white_list", isMut: false, isSigner: false },
         ],
-        args: [{ name: 'amount', type: 'u64' }],
+        args: [{ name: "amount", type: "u64" }],
       },
       {
-        name: 'add_to_whitelist',
+        name: "add_to_whitelist",
         discriminator: [157, 211, 52, 54, 144, 81, 5, 55],
         accounts: [
-          { name: 'new_account', isMut: false, isSigner: false },
-          { name: 'white_list', isMut: true, isSigner: false },
-          { name: 'signer', isMut: true, isSigner: true },
+          { name: "new_account", isMut: false, isSigner: false },
+          { name: "white_list", isMut: true, isSigner: false },
+          { name: "signer", isMut: true, isSigner: true },
         ],
         args: [],
       },
@@ -62,12 +79,12 @@ describe('transfer-hook', () => {
     accounts: [],
     types: [
       {
-        name: 'WhiteList',
+        name: "WhiteList",
         type: {
-          kind: 'struct',
+          kind: "struct",
           fields: [
-            { name: 'authority', type: 'pubkey' },
-            { name: 'white_list', type: { vec: 'pubkey' } },
+            { name: "authority", type: "pubkey" },
+            { name: "white_list", type: { vec: "pubkey" } },
           ],
         },
       },
@@ -78,7 +95,7 @@ describe('transfer-hook', () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
-  console.log('Using program id', PROGRAM_ID);
+  console.log("Using program id", PROGRAM_ID);
 
   const program = new anchor.Program(IDL, provider);
   const wallet = provider.wallet as anchor.Wallet;
@@ -88,20 +105,32 @@ describe('transfer-hook', () => {
   const mint = new Keypair();
   const decimals = 9;
   const [extraAccountMetaListPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from('extra-account-metas'), mint.publicKey.toBuffer()],
-    PROGRAM_PUBKEY,
+    [Buffer.from("extra-account-metas"), mint.publicKey.toBuffer()],
+    PROGRAM_PUBKEY
   );
-  const [whiteListPda] = PublicKey.findProgramAddressSync([Buffer.from('white_list')], PROGRAM_PUBKEY);
+  const [whiteListPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("white_list")],
+    PROGRAM_PUBKEY
+  );
 
-  const sendTxWithLogs = async (transaction: Transaction, signers: Keypair[] = []) => {
+  const sendTxWithLogs = async (
+    transaction: Transaction,
+    signers: Keypair[] = []
+  ) => {
     // Always capture signature and logs for debugging
     transaction.feePayer = wallet.publicKey;
-    const sig = await connection.sendTransaction(transaction, [wallet.payer, ...signers], {
-      skipPreflight: true,
+    const sig = await connection.sendTransaction(
+      transaction,
+      [wallet.payer, ...signers],
+      {
+        skipPreflight: true,
+      }
+    );
+    const tx = await connection.getTransaction(sig, {
+      commitment: "confirmed",
     });
-    const tx = await connection.getTransaction(sig, { commitment: 'confirmed' });
     if (tx?.meta?.err) {
-      console.error('Tx failed', sig, tx.meta.err, tx.meta.logMessages);
+      console.error("Tx failed", sig, tx.meta.err, tx.meta.logMessages);
       throw new Error(JSON.stringify(tx.meta.err));
     }
     return sig;
@@ -113,7 +142,7 @@ describe('transfer-hook', () => {
     wallet.publicKey,
     false,
     TOKEN_2022_PROGRAM_ID,
-    ASSOCIATED_TOKEN_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID
   );
 
   // Recipient token account address
@@ -123,13 +152,14 @@ describe('transfer-hook', () => {
     recipient.publicKey,
     false,
     TOKEN_2022_PROGRAM_ID,
-    ASSOCIATED_TOKEN_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID
   );
 
-  it('Create Mint Account with Transfer Hook Extension', async () => {
+  it("Create Mint Account with Transfer Hook Extension", async () => {
     const extensions = [ExtensionType.TransferHook];
     const mintLen = getMintLen(extensions);
-    const lamports = await provider.connection.getMinimumBalanceForRentExemption(mintLen);
+    const lamports =
+      await provider.connection.getMinimumBalanceForRentExemption(mintLen);
 
     const transaction = new Transaction().add(
       SystemProgram.createAccount({
@@ -143,9 +173,15 @@ describe('transfer-hook', () => {
         mint.publicKey,
         wallet.publicKey,
         program.programId, // Transfer Hook Program ID
-        TOKEN_2022_PROGRAM_ID,
+        TOKEN_2022_PROGRAM_ID
       ),
-      createInitializeMintInstruction(mint.publicKey, decimals, wallet.publicKey, null, TOKEN_2022_PROGRAM_ID),
+      createInitializeMintInstruction(
+        mint.publicKey,
+        decimals,
+        wallet.publicKey,
+        null,
+        TOKEN_2022_PROGRAM_ID
+      )
     );
 
     const txSig = await sendTxWithLogs(transaction, [mint]);
@@ -154,7 +190,7 @@ describe('transfer-hook', () => {
 
   // Create the two token accounts for the transfer-hook enabled mint
   // Fund the sender token account with 100 tokens
-  it('Create Token Accounts and Mint Tokens', async () => {
+  it("Create Token Accounts and Mint Tokens", async () => {
     // 100 tokens
     const amount = 100 * 10 ** decimals;
 
@@ -165,7 +201,7 @@ describe('transfer-hook', () => {
         wallet.publicKey,
         mint.publicKey,
         TOKEN_2022_PROGRAM_ID,
-        ASSOCIATED_TOKEN_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
       ),
       createAssociatedTokenAccountInstruction(
         wallet.publicKey,
@@ -173,9 +209,16 @@ describe('transfer-hook', () => {
         recipient.publicKey,
         mint.publicKey,
         TOKEN_2022_PROGRAM_ID,
-        ASSOCIATED_TOKEN_PROGRAM_ID,
+        ASSOCIATED_TOKEN_PROGRAM_ID
       ),
-      createMintToInstruction(mint.publicKey, sourceTokenAccount, wallet.publicKey, amount, [], TOKEN_2022_PROGRAM_ID),
+      createMintToInstruction(
+        mint.publicKey,
+        sourceTokenAccount,
+        wallet.publicKey,
+        amount,
+        [],
+        TOKEN_2022_PROGRAM_ID
+      )
     );
 
     const txSig = await sendTxWithLogs(transaction);
@@ -184,7 +227,7 @@ describe('transfer-hook', () => {
   });
 
   // Account to store extra accounts required by the transfer hook instruction
-  it('Create ExtraAccountMetaList Account', async () => {
+  it("Create ExtraAccountMetaList Account", async () => {
     const initializeExtraAccountMetaListInstruction = await program.methods
       .initializeExtraAccountMetaList()
       .accounts({
@@ -196,14 +239,16 @@ describe('transfer-hook', () => {
       })
       .instruction();
 
-    const transaction = new Transaction().add(initializeExtraAccountMetaListInstruction);
+    const transaction = new Transaction().add(
+      initializeExtraAccountMetaListInstruction
+    );
 
     const txSig = await sendTxWithLogs(transaction);
 
-    console.log('Transaction Signature:', txSig);
+    console.log("Transaction Signature:", txSig);
   });
 
-  it('Add account to white list', async () => {
+  it("Add account to white list", async () => {
     const addAccountToWhiteListInstruction = await program.methods
       .addToWhitelist()
       .accounts({
@@ -216,31 +261,32 @@ describe('transfer-hook', () => {
     const transaction = new Transaction().add(addAccountToWhiteListInstruction);
 
     const txSig = await sendTxWithLogs(transaction);
-    console.log('White Listed:', txSig);
+    console.log("White Listed:", txSig);
   });
 
-  it('Transfer Hook with Extra Account Meta', async () => {
+  it("Transfer Hook with Extra Account Meta", async () => {
     // 1 tokens
     const amount = 1 * 10 ** decimals;
     const bigIntAmount = BigInt(amount);
 
     // Standard token transfer instruction
-    const transferInstruction = await createTransferCheckedWithTransferHookInstruction(
-      connection,
-      sourceTokenAccount,
-      mint.publicKey,
-      destinationTokenAccount,
-      wallet.publicKey,
-      bigIntAmount,
-      decimals,
-      [],
-      'confirmed',
-      TOKEN_2022_PROGRAM_ID,
-    );
+    const transferInstruction =
+      await createTransferCheckedWithTransferHookInstruction(
+        connection,
+        sourceTokenAccount,
+        mint.publicKey,
+        destinationTokenAccount,
+        wallet.publicKey,
+        bigIntAmount,
+        decimals,
+        [],
+        "confirmed",
+        TOKEN_2022_PROGRAM_ID
+      );
 
     const transaction = new Transaction().add(transferInstruction);
 
     const txSig = await sendTxWithLogs(transaction);
-    console.log('Transfer Checked:', txSig);
+    console.log("Transfer Checked:", txSig);
   });
 });
